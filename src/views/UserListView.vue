@@ -1,8 +1,12 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+
+import { ref, onMounted, watch } from 'vue';
 import userService from '../services/userService';
+import roleService from '../services/roleService';
+import { handleServerErrors, getErrorMessage } from '../utils/validation';
 
 const users = ref([]);
+const roles = ref([]);
 const loading = ref(true);
 const error = ref(null);
 const showModal = ref(false);
@@ -15,6 +19,37 @@ const formData = ref({
   email: '',
   password: ''
 });
+
+const errors = ref({
+  name: '',
+  email: '',
+  password: ''
+});
+
+const validateForm = () => {
+  let isValid = true;
+  errors.value = { name: '', email: '', password: '' };
+
+  if (!formData.value.name.trim()) {
+    errors.value.name = 'Name is required';
+    isValid = false;
+  }
+
+  if (!formData.value.email.trim()) {
+    errors.value.email = 'Email is required';
+    isValid = false;
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.value.email)) {
+    errors.value.email = 'Invalid email format';
+    isValid = false;
+  }
+
+  if (modalMode.value === 'create' && !formData.value.password) {
+    errors.value.password = 'Password is required';
+    isValid = false;
+  }
+
+  return isValid;
+};
 
 // Pagination and filtering
 const currentPage = ref(1);
@@ -44,6 +79,15 @@ const fetchUsers = async () => {
   }
 };
 
+const fetchRoles = async () => {
+  try {
+    const response = await roleService.getRoles();
+    roles.value = response.data || [];
+  } catch (err) {
+    console.error('Failed to load roles', err);
+  }
+};
+
 // Search handler with debounce
 let searchTimeout;
 const handleSearch = () => {
@@ -67,25 +111,45 @@ const handleSort = (field) => {
 // Modal handlers
 const openCreateModal = () => {
   modalMode.value = 'create';
-  formData.value = { name: '', email: '', password: '' };
+  formData.value = { name: '', email: '', password: '', role_ids: [] };
   showModal.value = true;
 };
 
-const openEditModal = (user) => {
-  modalMode.value = 'edit';
-  currentUser.value = user;
-  formData.value = {
-    name: user.name,
-    email: user.email,
-    password: '' // Password is optional on update
-  };
-  showModal.value = true;
+const openEditModal = async (user) => {
+  try {
+    // Optional: Add a local loading state if needed
+    const response = await userService.getUser(user.id);
+    const fullUser = response.data;
+
+    modalMode.value = 'edit';
+    currentUser.value = fullUser;
+    formData.value = {
+      name: fullUser.name,
+      email: fullUser.email,
+      password: '', // Password is optional on update
+      role_ids: fullUser.roles ? fullUser.roles.map(r => r.id) : []
+    };
+    showModal.value = true;
+  } catch (err) {
+    console.error('Failed to load user details', err);
+    // Fallback to using the passed user object if fetch fails
+    modalMode.value = 'edit';
+    currentUser.value = user;
+    formData.value = {
+      name: user.name,
+      email: user.email,
+      password: '',
+      role_ids: user.roles ? user.roles.map(r => r.id) : []
+    };
+    showModal.value = true;
+  }
 };
 
 const closeModal = () => {
   showModal.value = false;
   currentUser.value = null;
-  formData.value = { name: '', email: '', password: '' };
+  formData.value = { name: '', email: '', password: '', role_ids: [] };
+  errors.value = { name: '', email: '', password: '' };
 };
 
 const openDeleteDialog = (user) => {
@@ -100,6 +164,8 @@ const closeDeleteDialog = () => {
 
 // CRUD operations
 const handleSubmit = async () => {
+  if (!validateForm()) return;
+
   try {
     const payload = { ...formData.value };
     
@@ -116,8 +182,10 @@ const handleSubmit = async () => {
     await fetchUsers();
     closeModal();
   } catch (err) {
-    error.value = `Failed to ${modalMode.value} user`;
-    console.error(err);
+    if (!handleServerErrors(err, errors)) {
+      error.value = getErrorMessage(err);
+      console.error(err);
+    }
   }
 };
 
@@ -143,6 +211,7 @@ const formatDate = (dateString) => {
 
 onMounted(() => {
   fetchUsers();
+  fetchRoles();
 });
 </script>
 
@@ -235,6 +304,23 @@ onMounted(() => {
             <td class="px-6 py-4 whitespace-nowrap">
               <div class="text-sm text-slate-600">{{ user.email }}</div>
             </td>
+            <td class="px-6 py-4">
+              <div class="flex flex-wrap gap-1">
+                <span
+                  v-for="role in (user.roles || []).slice(0, 2)"
+                  :key="role.id"
+                  class="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded"
+                >
+                  {{ role.name }}
+                </span>
+                <span
+                  v-if="(user.roles || []).length > 2"
+                  class="px-2 py-1 text-xs font-medium bg-slate-100 text-slate-600 rounded"
+                >
+                  +{{ (user.roles || []).length - 2 }}
+                </span>
+              </div>
+            </td>
             <td class="px-6 py-4 whitespace-nowrap">
               <div class="text-sm text-slate-600">{{ formatDate(user.created_at) }}</div>
             </td>
@@ -263,7 +349,7 @@ onMounted(() => {
     </div>
 
     <!-- Create/Edit Modal -->
-    <div v-if="showModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div v-if="showModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
       <div class="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
         <div class="px-6 py-4 border-b border-slate-200">
           <h3 class="text-lg font-bold text-slate-800">
@@ -279,6 +365,7 @@ onMounted(() => {
               class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
               placeholder="John Doe"
             />
+            <p v-if="errors.name" class="text-red-500 text-xs mt-1">{{ errors.name }}</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1">Email</label>
@@ -288,6 +375,7 @@ onMounted(() => {
               class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
               placeholder="john@example.com"
             />
+            <p v-if="errors.email" class="text-red-500 text-xs mt-1">{{ errors.email }}</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1">
@@ -299,6 +387,25 @@ onMounted(() => {
               class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
               :placeholder="modalMode === 'create' ? 'Enter password' : 'Leave blank to keep current'"
             />
+            <p v-if="errors.password" class="text-red-500 text-xs mt-1">{{ errors.password }}</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Roles</label>
+            <div class="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto border border-slate-300 rounded-lg p-2">
+              <label
+                v-for="role in roles"
+                :key="role.id"
+                class="flex items-center space-x-2 p-1 hover:bg-slate-50 rounded cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  :value="role.id"
+                  v-model="formData.role_ids"
+                  class="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                />
+                <span class="text-sm text-slate-700">{{ role.name }}</span>
+              </label>
+            </div>
           </div>
         </div>
         <div class="px-6 py-4 border-t border-slate-200 flex justify-end space-x-3">
@@ -319,7 +426,7 @@ onMounted(() => {
     </div>
 
     <!-- Delete Confirmation Dialog -->
-    <div v-if="showDeleteDialog" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div v-if="showDeleteDialog" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
       <div class="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
         <div class="px-6 py-4 border-b border-slate-200">
           <h3 class="text-lg font-bold text-slate-800">Delete User</h3>
