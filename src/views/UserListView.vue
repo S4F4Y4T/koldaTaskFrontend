@@ -281,7 +281,7 @@ onMounted(() => {
               Email
             </th>
             <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Created At
+              Roles
             </th>
             <th class="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">
               Actions
@@ -320,9 +320,6 @@ onMounted(() => {
                   +{{ (user.roles || []).length - 2 }}
                 </span>
               </div>
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap">
-              <div class="text-sm text-slate-600">{{ formatDate(user.created_at) }}</div>
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
               <button
